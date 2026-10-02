@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bedford Leads – Demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--line:#ddd;--hi:#b42318;--ac:#0b5cad}
+@media(prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eee;--mut:#999;--line:#333;--hi:#f97066;--ac:#6cb2ff}}
+*{box-sizing:border-box}body{font:14px system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0}
+header{padding:12px 14px;border-bottom:1px solid var(--line)}h1{font-size:18px;margin:0}
+.ban{background:#fff4d6;color:#5c4400;padding:6px 14px;font-size:12px}
+form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px}
+input,select,button{font:inherit;padding:6px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px}
+button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}
+#map{height:340px;border-bottom:1px solid var(--line)}
+.w{overflow-x:auto;padding:0 14px}table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+tr.r{cursor:pointer}tr.r:hover,tr.sel{background:rgba(127,127,127,.15)}
+.s{font-weight:700}.s.h{color:var(--hi)}.m{color:var(--mut)}
+#d{margin:12px 14px 24px;padding:10px;border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;display:none}
+.cnt{padding:0 14px 6px;color:var(--mut)}
+</style></head><body>
+<div class="ban">DEMO: all owners, addresses and records below are fictional sample data.</div>
+<header><h1>Bedford County Lead Finder</h1><span class="m">Finds likely motivated sellers by combining property, owner and distress records</span></header>
+<form id="f">
+  <input name="q" placeholder="Address or owner">
+  <input name="min_score" type="number" placeholder="Min score" style="width:90px">
+  <input name="min_tenure" type="number" placeholder="Min yrs owned" style="width:115px">
+  <select name="signal"><option value="">Any signal</option><option value="trustee sale">Trustee sale</option>
+    <option value="lis pendens">Lis pendens</option><option value="tax delinquent">Tax delinquent</option>
+    <option value="probate">Probate</option><option value="code violation">Code violation</option><option value="estate">Estate/heirs</option></select>
+  <label><input type="checkbox" name="absentee"> Absentee owner</label>
+  <label><input type="checkbox" name="land"> Land only</label>
+  <button>Search</button><button type="button" id="csv">Export CSV</button>
+</form>
+<div id="map"></div><div class="cnt" id="cnt"></div>
+<div class="w"><table><thead><tr><th>Score</th><th>Property</th><th>Owner</th><th>Mailing</th><th>Assessed</th><th>Yrs</th><th>Signals</th></tr></thead><tbody id="b"></tbody></table></div>
+<div id="d"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---- fictional data, seeded so it is the same every load ----
+let seed=7;const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const pk=a=>a[Math.floor(rnd()*a.length)];
+const areas=[["Bedford",37.334,-79.523,"Bedford"],["Smith Mountain Lake",37.07,-79.60,"Moneta"],["Moneta",37.18,-79.62,"Moneta"],
+ ["Forest",37.37,-79.28,"Forest"],["Goode",37.38,-79.40,"Bedford"],["Huddleston",37.20,-79.50,"Huddleston"],["Montvale",37.40,-79.74,"Montvale"]];
+const last=["Harper","Whitlow","Crenshaw","Beasley","Tolliver","Maddox","Pruitt","Sandridge","Overstreet","Carwile","Dillard","Mosley"];
+const first=["James","Linda","Robert","Patricia","Dale","Carol","Wayne","Ruth","Gary","Nancy","Earl","Betty"];
+const st=["Lakeview Dr","Old Forest Rd","Hickory Ln","Mountain View Rd","Peaks Rd","Cove Ct","Orchard Ln","Thaxton Rd","Dogwood Trl","Lee St"];
+const oos=[["Raleigh","NC"],["Charlotte","NC"],["Atlanta","GA"],["Baltimore","MD"],["Newark","NJ"],["Tampa","FL"]];
+const pts={"trustee sale":35,"lis pendens":30,"tax delinquent":25,"probate":25,"code violation":15};
+const Y=new Date().getFullYear();
+const rows=[];
+for(let i=0;i<48;i++){
+  const a=pk(areas),lat=a[1]+(rnd()-.5)*.08,lon=a[2]+(rnd()-.5)*.1,num=100+Math.floor(rnd()*900);
+  const ent=rnd()<.12,estate=!ent&&rnd()<.08,nm=pk(last)+" "+pk(first);
+  const owner=ent?pk(last).toUpperCase()+" HOLDINGS LLC":estate?"ESTATE OF "+nm.toUpperCase():nm.toUpperCase();
+  const situs=`${num} ${pk(st)}, ${a[3]}`;const land=rnd()<.15;
+  const out=rnd()<.25,diff=!out&&rnd()<.2;const o=pk(oos);
+  const sy=Y-Math.floor(2+rnd()*34),price=Math.round((60+rnd()*220)/5)*5*1000;
+  const imp=land?0:Math.round(80+rnd()*250)*1000,lnd=Math.round(30+rnd()*160)*1000;
+  const sigs=[];for(const t of Object.keys(pts))if(rnd()<(t=="code violation"?.12:.09))sigs.push(t);
+  rows.push({id:i,situs,owner,lat,lon,land,sigs,estate,ent,
+   mail:out?`${num+40} Elm St, ${o[0]}, ${o[1]}`:diff?`PO Box ${Math.floor(rnd()*900)}, ${a[3]}, VA`:situs+", VA",
+   mode:out?"out":diff?"diff":"same",oos:out?o[1]:"",sy,price,assessed:imp+lnd,tenure:Y-sy});
+}
+function score(r){const why=[];
+  r.sigs.forEach(t=>why.push([pts[t],t]));
+  if(r.estate)why.push([20,"owner name indicates estate/heirs"]);
+  if(r.mode=="out")why.push([20,`out-of-state owner (${r.oos})`]);else if(r.mode=="diff"&&!r.ent)why.push([12,"mailing address differs from property"]);
+  for(const [l,p] of [[25,20],[15,15],[8,5]])if(r.tenure>=l){why.push([p,`owned ${l}+ yrs`]);break}
+  if(r.assessed/r.price>=2)why.push([10,"assessed 2x+ last sale price (equity proxy)"]);
+  if(r.sigs.length+(r.estate?1:0)>=2)why.push([10,"multiple signals"]);
+  r.why=why;r.score=Math.min(100,why.reduce((s,w)=>s+w[0],0));r.absentee=r.mode=="out"||(r.mode=="diff"&&!r.ent);
+  r.all=[...r.sigs,...(r.estate?["estate"]:[])]}
+rows.forEach(score);
+// ---- UI ----
+const map=L.map("map").setView([37.25,-79.5],10);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap"}).addTo(map);
+const layer=L.layerGroup().addTo(map),f=document.getElementById("f"),b=document.getElementById("b"),d=document.getElementById("d");
+const color=s=>s>=60?"#b42318":s>=35?"#e08a00":s>=15?"#3b82c4":"#8a8a8a";
+let cur=[],markers={};
+function filt(){const q=Object.fromEntries(new FormData(f));
+  return rows.filter(r=>(!q.q||(r.situs+r.owner).toLowerCase().includes(q.q.toLowerCase()))&&(!q.min_score||r.score>=+q.min_score)
+   &&(!q.min_tenure||r.tenure>=+q.min_tenure)&&(!q.signal||r.all.includes(q.signal))&&(!q.absentee||r.absentee)&&(!q.land||r.land)).sort((a,b)=>b.score-a.score)}
+function show(id){const r=rows[id];d.style.display="block";
+  d.textContent=`${r.situs}\nOwner: ${r.owner}\nMailing: ${r.mail}\nLast sale: ${r.sy}, $${r.price.toLocaleString()}   Assessed: $${r.assessed.toLocaleString()}\n\nScore ${r.score}\n`+r.why.map(w=>`+${w[0]} ${w[1]}`).join("\n");
+  document.querySelectorAll("tr.r").forEach(t=>t.classList.toggle("sel",t.dataset.id==id));map.flyTo([r.lat,r.lon],13);markers[id]&&markers[id].openPopup()}
+function render(){cur=filt();layer.clearLayers();markers={};
+  cur.forEach(r=>{markers[r.id]=L.circleMarker([r.lat,r.lon],{radius:5+r.score/12,color:color(r.score),fillOpacity:.7}).addTo(layer)
+    .bindPopup(`<b>${r.situs}</b><br>Score ${r.score}`).on("click",()=>show(r.id))});
+  document.getElementById("cnt").textContent=`${cur.length} of ${rows.length} properties, highest score first`;
+  b.innerHTML=cur.map(r=>`<tr class="r" data-id="${r.id}"><td class="s ${r.score>=60?"h":""}">${r.score}</td><td>${r.situs}</td><td>${r.owner}</td>
+   <td class="m">${r.mail}</td><td>$${r.assessed.toLocaleString()}</td><td>${r.tenure}</td><td>${r.all.join(", ")}</td></tr>`).join("")||'<tr><td colspan="7" class="m">No results</td></tr>'}
+b.onclick=e=>{const t=e.target.closest("tr.r");if(t)show(+t.dataset.id)};
+f.onsubmit=e=>{e.preventDefault();render()};
+document.getElementById("csv").onclick=()=>{const h="score,property,owner,mailing,assessed,years_owned,signals";
+  const c=cur.map(r=>[r.score,r.situs,r.owner,r.mail,r.assessed,r.tenure,r.all.join("; ")].map(v=>`"${v}"`).join(","));
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([[h,...c].join("\n")],{type:"text/csv"}));a.download="leads.csv";a.click()};
+render();
+</script></body></html>
